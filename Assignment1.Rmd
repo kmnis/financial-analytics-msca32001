@@ -1,0 +1,133 @@
+---
+title: "Assignment1"
+author: "Manish Kumar"
+date: "2023-01-11"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+
+### 1. Read Chapter 1 of the book
+
+### 2. Download and analyze adjusted excess returns of S&P 500. In case if package `quantmod` is not working on your system, download the data directly from the web site <https://finance.yahoo.com>
+
+#### 2.1 Calculate continuous daily excess returns of SP500 ("\^GSPC") for the period from 1/1/2022 until 12/22/2022 using overnight Fed Funds rates as risk-free rates
+
+```{r}
+# Load the required library
+suppressMessages(library(quantmod))
+
+# Get the S&P500 data and Fed Funds Rates
+getSymbols("^GSPC", src="yahoo", from=as.Date("2022-01-01"), to=as.Date("2022-12-22"), periodicity="daily")
+getSymbols("DFF", src="FRED", from=as.Date("2022-01-01"), to=as.Date("2022-12-22"), periodicity="daily")
+
+# Calculate daily returns (dailyReturns automatically takes care of the Adjusted closing price)
+SP500 <- dailyReturn(GSPC)
+
+# Filter and order by the date range in S&P500 data
+fed_funds_rate = DFF[rownames(data.frame(SP500))] / 100
+
+# Calculate excess returns
+daily_excess_returns = (SP500 - fed_funds_rate) * 100
+
+# Show and plot the data
+head(daily_excess_returns)
+plot(daily_excess_returns, ylab="Excess returns of SP500", main="Continuous Excess Daily Returns of S&P 500")
+
+```
+
+#### 2.2 Calculate average daily excess return, actual return of S&P 500 in 2022 per day, and average FedFund rate of return per day
+
+```{r}
+# Average daily excess return
+cat("Average Daily Excess Return:", mean(daily_excess_returns), "\n")
+
+# Actual return for S&P500
+head(SP500)
+plot(SP500)
+
+# Average FedFund rate of return
+cat("Average FedFund rate of Return:", mean(fed_funds_rate), "\n")
+```
+
+### 3. Download and analyze exchange rates. In case if package `quantmod` is not working on your system, download the data directly from the web site <https://finance.yahoo.com>.
+
+Answer the following questions (as in Exercise 5 on page 37) as a refresher of statistical analysis skills. Try to do it without using R demo code from the book.
+
+#### 3.1 Download from `Oanda` using method `getFX()` from library `quantmode` for the period from July 1, 2022 to December 22, 2022:
+
+-   GBP/USD exchange rate, i.e. price of 1 British pound in US dollars
+-   USD/JPY exchange rate, i.e. price of 1 US dollar in Japanese yen
+
+```{r}
+# Download exchange rates
+suppressWarnings(getFX("GBP/USD", src="oanda", from=as.Date("2022-07-01"), to=as.Date("2022-12-22")))
+suppressWarnings(getFX("USD/JPY", src="oanda", from=as.Date("2022-07-01"), to=as.Date("2022-12-22")))
+```
+
+#### 3.2 Calculate daily log returns of both exchange rates
+
+```{r}
+daily_log_ret_gbp <- diff(log(GBPUSD))
+daily_log_ret_jpy <- diff(log(USDJPY))
+
+head(daily_log_ret_gbp)
+head(daily_log_ret_jpy)
+```
+
+#### 3.3 Calculate sample min, mean, sd, skewness, kurtosis, max of log returns for both exchange rates
+
+```{r}
+suppressMessages(library(fBasics))
+
+print("Stats for GBP")
+# Min
+cat("Min: ", min(daily_log_ret_gbp, na.rm=TRUE), "\n")
+
+# Mean
+cat("Mean: ", mean(daily_log_ret_gbp, na.rm=TRUE), "\n")
+
+# Standard Deviation
+cat("Sd: ", sd(daily_log_ret_gbp, na.rm=TRUE), "\n")
+
+# Skewness
+cat("Skewness: ", skewness(daily_log_ret_gbp, na.rm=TRUE), "\n")
+
+# Kurtosis
+cat("Kurtosis: ", kurtosis(daily_log_ret_gbp, na.rm=TRUE), "\n")
+
+# Max
+cat("Max: ", max(daily_log_ret_gbp, na.rm=TRUE), "\n")
+```
+
+```{r}
+print("Stats for JPY")
+
+# Min
+cat("Min: ", min(daily_log_ret_jpy, na.rm=TRUE), "\n")
+
+# Mean
+cat("Min: ", mean(daily_log_ret_jpy, na.rm=TRUE), "\n")
+
+# Standard Deviation
+cat("Min: ", sd(daily_log_ret_jpy, na.rm=TRUE), "\n")
+
+# Skewness
+cat("Min: ", skewness(daily_log_ret_jpy, na.rm=TRUE), "\n")
+
+# Kurtosis
+cat("Min: ", kurtosis(daily_log_ret_jpy, na.rm=TRUE), "\n")
+
+# Max
+cat("Min: ", max(daily_log_ret_jpy, na.rm=TRUE), "\n")
+```
+
+#### 3.4 Test hypothesis H~0~: μ=0 against alternative H~0~: μ≠0
+
+```{r}
+suppressWarnings(t.test(daily_log_ret_gbp))
+suppressWarnings(t.test(daily_log_ret_jpy))
+```
+In both cases, Since this p-value is greater than 0.05, we fail to reject the null hypothesis.
