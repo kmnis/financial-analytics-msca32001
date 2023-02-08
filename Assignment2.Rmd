@@ -1,0 +1,285 @@
+---
+title: "Assignment2"
+author: "Manish Kumar"
+date: "Jan 25, 2023"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+
+### Create efficient frontier, CAPM model and APT model for a group of stocks representing health care sector and industrial sector.
+### The names of the selected companies are in the file `Industrials_Health_Names.csv`.
+### The period of observation is `from="2014-7-1", to="2015-7-1"`.
+
+### For the sector indices use SPDR XLV (health care sector) and XLI (industrial sector).
+### For the broad market index use SPY.
+### For the risk-free rate use Fed Funds effective rate.
+
+### Note that it may not be possible to find interpretation of PCA factors in terms of real assets or indices.
+### In such cases it is possible to use PCA factors without interpretation.
+
+```{r}
+suppressMessages(library(quantmod))
+suppressMessages(library(dplyr))
+
+# Load the csv files
+SP500.Industrials.Health = read.csv(file="Industrials_Health_Names.csv", header=F)
+
+# Remove UTX since the company has gone private and no history exists
+SP500.Industrials.Health = SP500.Industrials.Health %>% filter(V1 != "UTX")
+
+SP500.Industrials.Health.names = as.character(SP500.Industrials.Health[, 1])
+FedFunds.Effective.Rate = read.csv(file="RIFSPFF_NB.csv")
+FedFunds.Effective.Rate = FedFunds.Effective.Rate[15094:15345,]
+```
+
+```{r}
+# Download historical data for companies
+getSymbols(SP500.Industrials.Health.names, from="2014-7-1", to="2015-7-1")
+
+# Download historical data for sector indices
+getSymbols("XLV", from="2014-7-1", to="2015-7-1")
+getSymbols("XLI", from="2014-7-1", to="2015-7-1")
+
+# Download historical data for broad market index
+getSymbols("SPY", from="2014-7-1", to="2015-7-1")
+```
+
+## 1. Efficient Frontier
+
+Calculating Mean and SD for each stock, sector and SPY
+```{r}
+# Calculate mean and standard deviation for each stock
+Mean.Sd.SP500.companies = cbind(
+  sd=sapply(SP500.Industrials.Health.names, function(z) sd(ROC(Ad(get(z))), na.rm=T)),
+  mean=sapply(SP500.Industrials.Health.names, function(z) mean(ROC(Ad(get(z))), na.rm=T))
+)
+
+head(Mean.Sd.SP500.companies)
+
+# Calculate the mean and standard deviation for XLV, XLI, and SPY
+Mean.Sd.XLV = c(sd(ROC(Ad(XLV)), na.rm=T), mean(ROC(Ad(XLV)), na.rm=T))
+Mean.Sd.XLI = c(sd(ROC(Ad(XLI)), na.rm=T), mean(ROC(Ad(XLI)), na.rm=T))
+Mean.Sd.SPY = c(sd(ROC(Ad(SPY)), na.rm=T), mean(ROC(Ad(SPY)), na.rm=T))
+Mean.FedFunds = mean(FedFunds.Effective.Rate[,2])/100/360
+```
+
+
+```{r}
+# Plotting the SPY companies on standard deviation-mean diagram
+plot(Mean.Sd.SP500.companies,
+     ylab="mean",
+     xlab="sd",
+     main="Efficient Frontier Model", pch=19, xlim=c(0,.03))
+
+# Adding the points for SPY and risk-free rate
+points(Mean.Sd.SPY[1], Mean.Sd.SPY[2], col="red", pch=19)
+points(Mean.Sd.XLV[1],Mean.Sd.XLV[2],col="blue", pch=19)
+points(Mean.Sd.XLI[1],Mean.Sd.XLI[2],col="magenta", pch=19)
+points(0, Mean.FedFunds, col="green", pch=19)
+
+# Adding the line connecting the points for risk-free rate and SPY
+lines(c(0, Mean.Sd.SPY[1]), c(Mean.FedFunds, Mean.Sd.SPY[2]))
+
+# Putting labels with the company names on the graph
+text(Mean.Sd.SP500.companies, labels=rownames(Mean.Sd.SP500.companies), cex=.5, pos=2)
+text(Mean.Sd.SPY[1], Mean.Sd.SPY[2], labels="SPY", cex=.5, col="red", pos=2)
+text(Mean.Sd.XLV[1], Mean.Sd.XLV[2], labels="XLV", cex=.5, col="blue", pos=2)
+text(Mean.Sd.XLI[1], Mean.Sd.XLI[2], labels="XLI", cex=.5, col="magenta", pos=2)
+text(0, Mean.FedFunds, labels="FF.RF", cex=.5, col="green", pos=2)
+```
+
+XLV did better than SPY while XLI did worse than the same. Stocks above the security line would be a better choice for a portfolio.
+
+## 2. CAPM model
+
+```{r}
+# Calculating the betas of all the companies on the list to SPY
+SP500.companies.sector.betas = as.matrix(
+  sapply(c(SP500.Industrials.Health.names, "XLV", "XLI"),
+         function(z) lm(I(
+           ROC(Ad(get(z))) - Mean.FedFunds
+        ) ~-1 + I(ROC(Ad(SPY)) - Mean.FedFunds))$coefficients)
+)
+
+head(SP500.companies.sector.betas)
+
+# Given Row Names for betas without SPY
+rownames(SP500.companies.sector.betas) = c(SP500.Industrials.Health.names, "XLV", "XLI")
+
+# Combine Company and Sector Means
+Mean.company.sector = c(Mean.Sd.SP500.companies[,2], "XLV"=Mean.Sd.XLV[2], "XLI"=Mean.Sd.XLI[2])
+```
+
+
+```{r}
+# Plot the CAPM diagram
+plot(SP500.companies.sector.betas[1:15], Mean.company.sector[1:15], pch=19,
+     main="CAPM Model", xlim=c(0, 2), ylab= "SP500 Companies Returns", xlab="Beta")
+
+# Adding the points for SPY and risk-free rate
+points(1, Mean.Sd.SPY[2], col="red", pch=19)
+points(0, Mean.FedFunds, col="green", pch=19)
+points(SP500.companies.sector.betas[16], Mean.company.sector[16], col="blue", pch=19)
+points(SP500.companies.sector.betas[17], Mean.company.sector[17], col="magenta", pch=19)
+
+# Adding the line connecting the points for risk-free rate and SPY
+lines(c(0, 1), c(Mean.FedFunds,Mean.Sd.SPY[2]))
+
+# Putting labels with the company names on the graph
+text(SP500.companies.sector.betas[1:15], Mean.company.sector[1:15],
+     labels=rownames(SP500.companies.sector.betas)[1:15], cex=.5, pos=2)
+text(1, Mean.Sd.SPY[2], labels="SPY", cex=.5, col="red", pos=2)
+text(0, Mean.FedFunds, labels="FF.RF", cex=.5, col="green", pos=2)
+text(SP500.companies.sector.betas[16], Mean.company.sector[16],
+     labels="XLV", cex=.5, col="blue", pos=2)
+text(SP500.companies.sector.betas[17], Mean.company.sector[17],
+     labels="XLI", cex=.5, col="magenta", pos=2)
+
+```
+
+Same as the Efficient Frontier model, XLV did better than SPY while XLI did worse than the same.
+
+
+## 3. Arbitrage Pricing Theory
+
+```{r}
+# Calculate daily returns for each stock 
+Stock.Portfolio.Returns = as.data.frame(matrix(NA, nrow=dim(SPY)[1] - 1,
+                                               ncol=length(SP500.Industrials.Health.names)))
+colnames(Stock.Portfolio.Returns) = c(SP500.Industrials.Health.names)
+
+for (i in colnames(Stock.Portfolio.Returns)){
+  Stock.Portfolio.Returns[,i] = ROC(Ad(get(i)))[-1,]
+}
+
+head(Stock.Portfolio.Returns)
+
+# Calculate the returns for SPY, XLV, and XLI
+SPY.returns = as.matrix(ROC(Ad(SPY))[-1])
+XLV.returns = as.matrix(ROC(Ad(XLV))[-1])
+XLI.returns = as.matrix(ROC(Ad(XLI))[-1])
+```
+
+#### 3.1 Step 1: Selection of factors
+```{r}
+# Start the process of factors selection by doing PCA on the stock portfolio
+Stock.Portfolio.Returns.PCA = princomp(Stock.Portfolio.Returns)
+
+# Calculate cumulative sum of all the standard deviations over the sum of standard deviations
+cumsum(Stock.Portfolio.Returns.PCA$sdev/sum(Stock.Portfolio.Returns.PCA$sdev))
+```
+
+Looking at the above values, we would need at least 13 factors to explain >90% variance. But we will proceed with 4 components, which accounts for nearly 50% of the variability.
+
+```{r}
+# Create 4 factors and 4 loadings
+Stock.Portfolio.Returns.PCA.factors = as.matrix(Stock.Portfolio.Returns.PCA$scores[,1:4])
+Stock.Portfolio.Returns.PCA.loadings = Stock.Portfolio.Returns.PCA$loadings[,1:4]
+Stock.Portfolio.Returns.PCA.zero.loading = Stock.Portfolio.Returns.PCA$center
+
+head(Stock.Portfolio.Returns.PCA.loadings)
+
+# Plot the loadings
+matplot(1:15, Stock.Portfolio.Returns.PCA.loadings, col=c('black', 'red', 'blue', 'magenta'),
+        type="l", lty=1, ylab='PCA Loadings', xlab="Stocks", ylim=c(-1.5,0.7))
+legend(2.5,-0.4,legend=c("C1", "C2", "C3", "C4"), col=c('black', 'red', 'blue', 'magenta'),
+       lty=1)
+abline(h=0)
+```
+
+PCA loadings are positive for the first component for all 15 stocks. That means that the first factor is positively correlated with SPY. For the second component, all except 2, are positive. 3rd and 4th components aren't very expressive.
+
+```{r}
+# Plot the first component with SPY
+plot(SPY.returns,Stock.Portfolio.Returns.PCA.factors[,1], type="l")
+```
+
+
+```{r}
+# Plot the second component with the differences in the 2 sectors
+plot(XLV.returns - XLI.returns, Stock.Portfolio.Returns.PCA.factors[,2], type = "l")
+```
+
+Fitting linear models explaining the interpretation of the components
+```{r}
+lm.fit.factor1 = lm(Stock.Portfolio.Returns.PCA.factors[,1] ~ SPY.returns)
+lm.fit.factor2 = lm(Stock.Portfolio.Returns.PCA.factors[,2] ~ I(XLV.returns - XLI.returns))
+summary(lm.fit.factor1)
+```
+
+```{r}
+summary(lm.fit.factor2)
+```
+In both fits intercepts are practically insignificant, but both slopes are significant.
+The first factor fit has pretty good R^2, the second is not strong.
+
+Check the residuals of both fits
+```{r}
+# Residuals of factor 1 fit
+hist(lm.fit.factor1$residuals)
+```
+
+```{r}
+qqnorm(lm.fit.factor1$residuals)
+qqline(lm.fit.factor1$residuals)
+```
+
+```{r}
+# Residuals of factor 2 fit
+hist(lm.fit.factor2$residuals)
+```
+
+```{r}
+qqnorm(lm.fit.factor2$residuals)
+qqline(lm.fit.factor2$residuals)
+```
+
+
+#### 3.2 Step 2: Estimation of betas
+
+```{r}
+# Check that betas are given by the PCA factor loadings
+Stock.portfolio.betas = apply(Stock.Portfolio.Returns, 2,
+                              function(z) lm(z~Stock.Portfolio.Returns.PCA.factors[,1] +
+                                               Stock.Portfolio.Returns.PCA.factors[,2] +
+                                               Stock.Portfolio.Returns.PCA.factors[,3] +
+                                               Stock.Portfolio.Returns.PCA.factors[,4]
+                                             )$coefficients)
+                            
+rownames(Stock.portfolio.betas) = c("Alpha", "Factor.1", "Factor.2", "Factor.3", "Factor.4")
+Stock.portfolio.betas = as.data.frame(t(Stock.portfolio.betas))
+
+Stock.portfolio.betas
+```
+```{r}
+cbind(zeroLoading=Stock.Portfolio.Returns.PCA.zero.loading,
+      Stock.Portfolio.Returns.PCA.loadings[,1:4])
+```
+
+####3.3 Step 3. Estimation of market price of risk
+
+```{r}
+Market.Prices.of.risk.fit = lm(I(Alpha-Mean.FedFunds)~.-1,data=Stock.portfolio.betas)
+summary(Market.Prices.of.risk.fit)
+
+```
+
+Both R^2 and adjusted R^2 are high.
+Slope parameters are significant for Factor 1, 2 and 3 at 5% level. The F test can reject the utility hypothesis with 5% level. Note that slopes for factor 4 are not significant.
+
+```{r}
+# Looking at coefficients of the factors from the linear model
+Market.Prices.of.risk = c(Mean.FedFunds,Market.Prices.of.risk.fit$coefficients)
+Market.Prices.of.risk
+```
+```{r}
+# Plot the residuals
+plot(Market.Prices.of.risk.fit$residuals,type="h",xaxt="n",xlab="Stock")
+abline(h=0)
+axis(1, at=1:15, labels=SP500.Industrials.Health.names)
+```
+
+When residual is positive it means that the mean excess return of the stock over the sample period is greater than predicted value, it means that the stock outperformed the predicted value of the model over the sample period and it is undervalued. When the residual is negative, it means that the stock gave less return than the model predicted value and it is overvalued by the model. 
