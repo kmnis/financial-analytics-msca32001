@@ -1,0 +1,181 @@
+---
+title: "Assignment4"
+author: "Manish Kumar"
+date: "Feb 1, 2023"
+output:
+  html_document:
+    df_print: paged
+---
+This assignment helps understanding stationarity and seasonality of linear models for time series
+
+Exercise 7 on page 126 of the Textbook
+
+Consider the quarterly earnings per share of Johnson & Johnson from the first quarter of 1992 to the second quarter of 2011. The data are in the file `q-jnj-earns-9211.txt` available on the textbook web page.
+
+- Take log transformation if necessary
+- Build a time series model for the data
+- Perform model checking to assess the adequacy of the fitted model
+- Write down the model
+- Refit the model using data from 1992 to 2008
+- Perform 1-step to 10-step forecasts of quarterly earnings and obtain a forecast plot
+
+```{r, warning=FALSE, include=FALSE}
+library(tseries)
+library(forecast)
+library(TSA)
+library(plotrix)
+```
+
+```{r}
+# Load the dataset
+df = read.table(file="q-jnj-earns-9211.txt", header=T)
+head(df)
+```
+
+#### Take log transformation if necessary.
+
+```{r}
+# Take a log and compare the results in a plot with raw values
+log.earns <- log(df$earns)
+par(mfrow=c(1,2))
+plot(ts(df$earns, frequency=4, start=c(1992,1)), type="l", main="Earnings")
+plot(ts(log.earns, frequency=4, start=c(1992,1)), type="l", main="Log Earnings")
+```
+
+Taking the log has helped in slightly straightening the slope of the timeseries plot. Also, `log.earns` is not stationary.
+
+#### Create a time series model for the data
+
+```{r}
+log.earns.diff = diff(log.earns)
+
+# From the previous plots, we could see that there was a seasonality of 4. Add it to earnings difference
+log.earns.seas.diff = diff(log.earns, 4)
+log.earns.seas.diff.diff = diff(log.earns.seas.diff)
+
+# Compare the acf plots
+par(mfrow=c(2,2))
+acf(log.earns)
+acf(log.earns.diff)
+acf(log.earns.seas.diff)
+acf(log.earns.seas.diff.diff)
+```
+
+We previously saw that `log.earns` was not stationary. However, after taking a difference of values (`log.earns.diff`), it removed the growth and highlighted seasonality. Every 4th bar is positive and large (second plot) so the seasonality is 4.
+
+Further, there's no sharp decay in ACF plots.
+
+Next, we added a seasonality of 4 to the earnings and took the difference again (`log.earns.seas.diff`). The third ACF plot show an exponential decay.
+
+To deal with this, we can take another difference (`log.earns.seas.diff.diff`) which seem to have made it stationary and removed seasonality (4th plot). But it seems to be going too far, we don't even have significant correlation at the first lag. This is also shown in the below timeseries plots for the same.
+
+```{r}
+# Make timeseries plots
+par(mfcol=c(3,1))
+plot(log.earns.diff, xlab="time", ylab="Difference", type="l")
+plot(log.earns.seas.diff, xlab="time", ylab="Seasonality difference", type="l")
+plot(log.earns.seas.diff.diff, xlab="time", ylab="Seas. & regular diff", type="l")
+```
+
+Let's do ADF tests to check whether the series are stationary
+
+First, find AR order for these data.
+```{r,warning=FALSE}
+ar_model1 = ar(log.earns, method='mle')
+adf.test(log.earns, k=ar_model1$order, alternative="stationary") 
+
+ar_model2 = ar(log.earns.diff, method='mle')
+adf.test(log.earns.diff, k=ar_model2$order, alternative="stationary")
+
+ar_model3 = ar(log.earns.seas.diff, method='mle')
+adf.test(log.earns.seas.diff, k=ar_model3$order, alternative="stationary") 
+
+ar_model4 = ar(log.earns.seas.diff.diff, method='mle')
+adf.test(log.earns.seas.diff.diff, k=ar_model4$order, alternative="stationary") 
+```
+
+
+ADF test for `log.earns.seas.diff.diff` shows a significant p-value, meaning we can reject the null hypothesis.
+
+Now we can find the order of the time series model using the double differenced data.
+
+Estimate the model ARIMA(0, 1, 1).
+```{r,warning=FALSE}
+arima_model = auto.arima(ts(log.earns.seas.diff.diff, frequency = 4))
+arima_model
+```
+
+
+#### Perform model check
+```{r}
+# Test the residuals
+tsdiag(arima_model, gof=20)
+```
+
+Adjust Box-Ljung Test for lag=12
+```{r}
+Box.test(arima_model$residuals, lag=12, type = "Ljung")
+```
+
+p-value is large so we cannot reject the null hypothesis. Therefore, no additional correlations in the residuals.
+
+Conclusion: The model is adequate.
+
+```{r, warning=FALSE}
+arima_model
+```
+
+#### Write down the model
+
+$(1-B)(1-B_{4})\xi_{t}=(1-0.3223B)(1-0.2175B_{4})\epsilon_{t}, \sigma^{2}_{\epsilon}=0.0012$
+
+#### Refit the model using data from 1992 to 2008
+
+```{r}
+df.new = df$earns[1:68]
+df.new.log = log(df.new)
+
+df.new.log.diff = diff(df.new.log)
+
+# Create a time series
+df.new.log.diff.ts = ts(df.new.log.diff, frequency=4)
+
+# Use auto.arima to suggest best model
+best.arima.model = auto.arima(df.new.log.diff.ts, seasonal = T)
+summary(best.arima.model)
+```
+
+#### Perform 1 to 10 step forecasts of earnings and obtain a forecast plot
+
+
+```{r}
+pred = predict(best.arima.model, 10)$pred
+se = predict(best.arima.model, 10)$se
+
+actual.df = df$earns
+
+fore = exp(pred + se^2/2)
+v1 = exp(2*pred + se^2)*(exp(se^2) - 1)
+s1 = sqrt(v1)
+eps = actual.df[49:78]
+length(eps)
+```
+
+
+```{r}
+tdx = (c(1:30) + 3) / 4 + 2003
+upp = c(actual.df[68], fore + 2*s1)
+low = c(actual.df[68], fore - 2*s1)
+min(low, eps)
+max(upp, eps)
+```
+
+```{r}
+
+plot(tdx, eps, xlab='year', ylab='earnings', type='l', ylim=c(0.35, 1.8))
+points(tdx[19:28], fore, pch='*')
+lines(tdx[18:28], upp, lty=2)
+lines(tdx[18:28], low, lty=2)
+points(tdx[19:28], df$earns[69:78], pch='o', cex=0.7)
+```
+
