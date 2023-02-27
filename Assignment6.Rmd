@@ -1,0 +1,197 @@
+---
+title: "Assignment6"
+author: "Manish Kumar"
+date: "Feb 23, 2023"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+### Fitting decomposition model (R)
+#### Fit decomposition model to `hft2_trades_train.csv`. Consider only positive, negative or zero changes of the price $A_t$. Make one-lag delayed price change the predictor for variable $A_t$.
+#### Use one-lag delayed direction variable $D_t$ as predictor for the price change direction.
+#### Use one-lag delayed price change size as predictor for the price change size $S_t$. Use asymmetric model, allowing price different positive and negative change sizes.
+#### Include parameters of the models in the report.
+
+```{r}
+df = read.csv('hft2_trades_train.csv', header=T)
+
+# Calculate seconds since market opening (timestamp is in microseconds (10^-6 seconds) )
+df$seconds = (df$timestamp - df$timestamp[1]) / 10^6
+
+head(df)
+```
+
+```{r}
+tick = 25  # Choose tick size 25 (original value 0.25 multiplied by 100)
+
+# Break the price changes into 3 categories by putting all increments greater than +1 equal to 1 and all increments less than -1 equal to -1.
+pch_vals = c(0, diff(df$price) / tick)
+
+df$pch = pch_vals
+pch_vals[pch_vals > 1] = 1
+pch_vals[pch_vals < -1] = -1
+
+head(df)
+```
+
+Creating the Lagged Variables
+```{r}
+df$A = as.integer(df$pch != 0)
+df$D = sign(df$pch)
+df$S = abs(df$pch)
+
+Ai=df$A[2:19494]
+Aim1=df$A[1:19493]
+
+Di=df$D[2:19494]
+Dim1=df$D[1:19493]
+
+Si=df$S[2:19494]
+Sim1=df$S[1:19493]
+
+head(df)
+```
+
+Create a model
+```{r}
+m1 = glm(Ai ~ Aim1, family="binomial")
+summary(m1)
+```
+
+```{r}
+di = Di[Ai==1]
+dim1 = Dim1[Ai==1]
+di = (di+abs(di))/2 # transform di to binary
+
+m2 = glm(di ~ dim1,family="binomial")
+summary(m2)
+```
+
+```{r}
+si = Si[Di==1]
+sim1 = Sim1[Di==1]
+
+# Fitting geometric distribution model is done by the script posted on the book web site.
+source("GeoSize.R")
+m3 = GeoSize(si, sim1)
+```
+
+```{r}
+nsi = Si[Di==-1]
+nsim1 = Sim1[Di==-1]
+m4 = GeoSize(nsi,nsim1)
+```
+
+From model for $A_i$:
+```{r}
+beta_0 = unname(m1$coefficients[1])
+beta_0
+```
+
+```{r}
+beta_1 = unname(m1$coefficients[2])
+beta_1
+```
+
+```{r}
+plogis(beta_0)   # prob of Ai = 1 when Aim1 = 0
+```
+
+```{r}
+plogis(beta_0 + 1*beta_1)  # prob of Ai = 1 when Aim1 = 1
+```
+
+Function `plogis()` returns probability of success of logistic model according to the given formula
+```{r}
+exp(beta_0)/(1+exp(beta_0))
+```
+
+```{r}
+exp(beta_0+beta_1)/(1+exp(beta_0+beta_1))
+```
+
+From model for $D_i$:
+```{r}
+gamma_0 = unname(m2$coefficients[1])
+gamma_0
+```
+
+```{r}
+gamma_1 = unname(m2$coefficients[2])
+gamma_1
+```
+
+Variables `gamma_0` and `gamma_1` are the coefficients of the logistic regression for `D`.
+```{r}
+plogis(gamma_0 - 1*gamma_1)  # prob of Di = 1 when Ai = 1, Dim1 = -1
+```
+
+```{r}
+plogis(gamma_0)              # prob of Di = 1 when Ai = 1, Dim1 =  0
+```
+
+```{r}
+plogis(gamma_0 + 1*gamma_1)  # prob of Di = 1 when Ai = 1, Dim1 = +1
+
+```
+
+Parameters of the third model are
+```{r}
+theta_u0 = unname(m3$par[1])
+theta_u0
+```
+
+```{r}
+theta_u1 = unname(m3$par[2])
+theta_u1
+```
+
+In case of negative price change (Di=1), the model parameters are
+
+```{r}
+theta_d0 = unname(m4$par[1])
+theta_d0
+```
+
+```{r}
+theta_d1 = unname(m4$par[2])
+theta_d1
+```
+
+Finally, probability $P(pch <=x )=P(A_iD_iS_i)=P(S_i|A_iD_i)P(D_i|A_i)P(A_i)$
+This probability is calculated by the following function.
+```{r}
+# Pr( next_pch <= x | aim1, dim1, sim1 )
+pch_decomposition_cdf <- function(x, aim1, dim1, sim1, decomp_params) {  
+    pch_cdf <- 0
+    p <- plogis(decomp_params$beta_0 + decomp_params$beta_1 * aim1)    # Pr( Ai =  1 | aim1 )
+    q <- plogis(decomp_params$gamma_0 + decomp_params$gamma_1 * dim1)  # Pr( Di = +1 | dim1 )
+    
+    lambda_up = plogis(decomp_params$theta_u0 + decomp_params$theta_u1 * sim1)
+    lambda_down = plogis(decomp_params$theta_d0 + decomp_params$theta_d1 * sim1)
+    
+    if (x < 0) {
+        # P( next_pch <= x ) = Pr( Ai = 1, Di = -1, Si >= -x ) = Pr( Ai = 1, Di = -1, Si > -x-1 ) 
+        # since Si ~ 1 + geom(lambda_down) when Di = -1 we have:
+        pch_cdf <- p * (1-q) * pgeom(-x-2, prob=lambda_down, lower.tail = FALSE) 
+    } else if (x >= 0) {
+        # P( next_pch <= x ) = Pr( Ai = 0 ) + Pr( Ai = 1, Di = 1 ) + Pr( Ai = 1, Di = -1, Si <= x ) = 
+        # = (1-p) + p*(1-q) + Pr( Ai = 1, Di = 1, Si <= x ) 
+        # since Si ~ 1 + geom(lambda_up) when Di = 1 we have:
+        pch_cdf <- (1-p) + p * (1-q) + p * q * pgeom(x-1, prob=lambda_up)
+    }
+    
+    return(pch_cdf)
+}
+```
+
+Collect parameters of decomposition model
+```{r}
+decomp_params = list(beta_0 = beta_0, beta_1 = beta_1,
+                      gamma_0 = gamma_0, gamma_1 = gamma_1,
+                      theta_u0 = theta_u0, theta_u1 = theta_u1,
+                      theta_d0 = theta_d0, theta_d1 = theta_d1)
+decomp_params
+```
