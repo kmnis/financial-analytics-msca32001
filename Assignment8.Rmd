@@ -1,0 +1,204 @@
+---
+title: "Assignment8"
+author: "Manish Kumar"
+date: "Feb 28, 2023"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+## Part I - Option Pricing
+A stock index is currently at 810 and has volatility of 20%.
+
+The risk-free rate is 5% per year.
+
+Assume that dividend yield equals 1%.
+
+#### 1. Price European 6-month call option with strike 800 using `EuropeanOption()` from `RQuantLib`
+
+```{r}
+suppressMessages(library(RQuantLib))
+
+underlying = 810
+volatility = 0.20
+riskFreeRate = 0.05
+dividendYield = 0.01
+strike = 800
+maturity = 0.5
+
+call = EuropeanOption(
+  type="call", underlying=underlying, strike=strike, riskFreeRate=riskFreeRate,
+  dividendYield=dividendYield, maturity=maturity, volatility=volatility
+)
+
+call$value
+```
+
+#### 2. Calculate the same premium manually using the formulas on the last slide of the lecture notes.
+
+Think how dividend yield should affect option price.
+
+Experiment with the function `EuropeanOption()` with zero or non-zero dividend yield and find how the Black-Scholes formula on slide 17 should be modified for dividend yield.
+
+$C=S_{0}N(d_{1})-(Kexp(-RT))N(d_{2})$
+
+$d_{1}=(ln(S_{0}/K) + (R + .5\sigma^2)  T)/(\sigma \sqrt(T))$
+
+$d2=d_{1} - (\sigma \sqrt(T))$
+
+```{r}
+
+d1 = (log(underlying / strike) + (riskFreeRate + .5 * (volatility^2)) * maturity) / (volatility * sqrt(maturity))
+d2 = d1 - (volatility * sqrt(maturity))
+
+C = (underlying * pnorm(d1, 0, 1)) - ((strike * exp(-riskFreeRate * maturity)) * pnorm(d2, 0, 1))
+C
+```
+
+
+```{r}
+# When dividendYield = 0
+callDiv0 = EuropeanOption(
+  type="call", underlying=underlying, strike=strike, dividendYield=0,
+  riskFreeRate=riskFreeRate, maturity=maturity, volatility=volatility
+)
+
+callDiv0$value
+```
+
+As dividend yields increase, the call option price should decrease.
+
+The Black Scholes Merton formula did not take dividend yields into consideration. The following is the Merton extension on the original formula.
+
+
+$C=S_{0} exp(-qT)N(d_{1})-(Kexp(-RT))N(d_{2})$
+
+$d_{1}=(ln(S_{0}/K) + (R - q+ .5\sigma^2)  T)/(\sigma \sqrt(T))$
+
+$d2=d_{1} - (\sigma \sqrt(T))$
+
+Where `q` is the dividend yield
+
+```{r}
+
+
+d1New = (log(underlying / strike) + (riskFreeRate - dividendYield + .5 * (volatility^2)) * maturity) / (volatility * sqrt(maturity))
+d2New = d1New - (volatility * sqrt(maturity))
+
+CNew = (underlying *exp(-dividendYield * maturity) * pnorm(d1New, 0, 1)) - ((strike * exp(-riskFreeRate * maturity)) * pnorm(d2New, 0, 1))
+
+CNew
+```
+
+The new formula generated call option price identical to the answer in part 1. 
+
+#### 3. Calculate the premium of put option with the same expiry and same strike using put-call parity
+
+Put-Call parity without dividend yield:
+
+$Put = Call + K exp(-RT) - S_{0}$
+
+Put-Call parity with dividend yield:
+
+$Put = Call + K exp(-RT) - S_{0}  exp(-qT)$
+
+```{r}
+putParity = CNew + (strike * exp(-riskFreeRate * maturity)) - (underlying * exp(-dividendYield * maturity))
+putParity
+```
+
+Let's verify the Put-Call parity formula using `EuropeanOption()`
+
+```{r}
+
+put = EuropeanOption(
+  type="put", underlying=underlying, strike=strike, dividendYield=dividendYield,
+  riskFreeRate=riskFreeRate, maturity=maturity, volatility=volatility
+)
+
+put$value 
+```
+
+## Part II - Options Hedging
+
+#### Using the options data from file `OptionsPrices.csv` used in the workshop calculate the P&L breakdown into `delta`, `gamma` and `vega` components of 1425 December 2007 put for each day between 2/27/2007 and 3/5/2007.
+#### Compare actual P&L for 1425 December 2007 put with the estimated daily P&L for each day between 2/27/2007 and 3/5/2007.
+#### Put the results in a table with columns: actual P&L, estimated P&L, delta P&L, gamma P&L, vega P&L.
+
+```{r}
+suppressWarnings(library(RQuantLib))
+
+optionsData = read.csv('OptionsPrices.csv', header=T, row.names=1)
+dim(optionsData) 
+head(optionsData)
+```
+
+
+Calculate implied volatility of put with strike 1425 between 2/26/2007 and 3/5/2007
+
+```{r}
+put1425ImpliedVolatility = as.vector(
+  apply(
+    optionsData[1:6,], 1, function(z) EuropeanOptionImpliedVolatility(
+      "put", value=z[26], underlying=z[3], strike=1425, dividendYield=z[2],
+      riskFreeRate=z[2], maturity=z[1] / 365, volatility=0.3
+    )
+  )
+) * 100
+
+cbind(row.names(optionsData[1:6,]), put1425ImpliedVolatility)
+```
+
+
+Find option premium and Greeks of 1425 put between 2/26/2007 and 3/5/2007
+
+```{r}
+putValues = matrix(NA, nrow=6, ncol=4)
+
+for(i in 1:6) {
+  currentPutValue = EuropeanOption(
+    type="put", underlying=optionsData[i, 3], strike=1425,
+    maturity=optionsData[i, 1] / 365, riskFreeRate=optionsData[i, 2],
+    volatility=put1425ImpliedVolatility[i] / 100,
+    dividendYield=optionsData[i, 2]
+  )
+  
+  putValues[i, 1] = as.numeric(currentPutValue[1])
+  putValues[i, 2] = as.numeric(currentPutValue[2])
+  putValues[i, 3] = as.numeric(currentPutValue[3])
+  putValues[i, 4] = as.numeric(currentPutValue[4])
+}
+
+colnames(putValues) = c('value', 'delta', 'gamma', 'vega')
+rownames(putValues) = row.names(optionsData[1:6, ])
+putValues
+```
+
+Calculate the estimated daily P&L for each day between 2/27/2007 and 3/5/2007
+
+```{r}
+PNLDaily = matrix(NA, nrow=5, ncol=5)
+
+for(i in 1:5) {
+  # actual P&L
+  PNLDaily[i, 1] = optionsData[i+1, 26] - optionsData[i, 26]
+  
+  # delta P&L
+  PNLDaily[i, 3] = putValues[i,2] * (optionsData[i+1, 3] - optionsData[i, 3])
+  
+  # gamma P&L
+  PNLDaily[i, 4] = 0.5 * putValues[i, 3] * (optionsData[i+1, 3] - optionsData[i, 3])^2
+  
+  # vega P&L
+  PNLDaily[i, 5] = putValues[i, 4] / 100 * (put1425ImpliedVolatility[i+1] - put1425ImpliedVolatility[i])
+  
+  # estimated P&L
+  PNLDaily[i, 2] = PNLDaily[i, 3] + PNLDaily[i, 4] + PNLDaily[i, 5]
+}
+
+colnames(PNLDaily) = c('actual P&L', 'estimated P&L', 'delta P&L', 'gamma P&L', 'vega P&L')
+rownames(PNLDaily) = row.names(optionsData[2:6, ])
+
+PNLDaily
+```
